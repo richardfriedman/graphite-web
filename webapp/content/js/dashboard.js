@@ -1824,6 +1824,12 @@ function graphClicked(graphView, graphIndex, element, evt) {
       width: 100,
       handler: function () { menu.destroy(); cloneGraph(record); }
     }, {
+      text: 'Plot.ly',
+      menu: [
+        {text: 'Config', handler: function() { menu.destroy(); plotlyForm(); } },
+        {text: 'Plot', handler: function() { menu.destroy(); plotlyGraph(record); } },
+      ]
+    }, {
       xtype: 'button',
       fieldLabel: "<span style='visibility: hidden'>",
       text: 'Email',
@@ -2155,6 +2161,126 @@ function cloneGraphRecord(record) {
     props.params.target = [props.params.target];
   }
   return new GraphRecord(props);
+}
+
+function plotlyForm() {
+
+  var windowOptions = {
+    title: "Plotly User Data",
+    width: 450,
+    height: 125,
+    modal: true,
+    layout: 'form',
+    items: [],
+    buttonAlign: "center",
+    buttons: [
+      {text: "Close", handler: function () { win.close(); } },
+      {text: "Save", handler: function () {
+        localStorage.setItem( 'plotly-username', plotlyUserField.getValue() );
+        localStorage.setItem( 'plotly-restkey', plotlyRestKey.getValue() );
+        win.close();
+      }}
+    ]
+  };
+
+  var plotlyUserField = new Ext.form.TextField({
+    fieldLabel: "User Name",
+    name: 'username',
+    width: 300,
+    allowBlank: false,
+    value : localStorage.getItem( 'plotly-username' )
+  });
+  windowOptions.items.push( plotlyUserField );
+
+  var plotlyRestKey = new Ext.form.TextField({
+    fieldLabel: "Rest Key",
+    name: 'restkey',
+    width: 300,
+    allowBlank: false,
+    value : localStorage.getItem( 'plotly-restkey' )
+  });
+  windowOptions.items.push( plotlyRestKey );
+
+  var win = new Ext.Window( windowOptions );
+  win.show();
+}
+
+function plotlyGraph( record ) {
+
+  var pUserName = localStorage.getItem( 'plotly-username' );
+  var pRestKey = localStorage.getItem( 'plotly-restkey' );
+
+  if ( !pUserName || !pRestKey ){
+    plotlyForm();
+    pUserName = localStorage.getItem( 'plotly-username' );
+    pRestKey = localStorage.getItem( 'plotly-restkey' );
+  }
+
+  Ext.Ajax.request({
+    url: window.location.origin + record.data.url + "&format=json",
+    success: function (response) {
+      var data = Ext.decode(response.responseText);
+      if (data.error) {
+        Ext.Msg.alert("Error Loading Data", data.error);
+      } else {
+
+        // Need to munge data from graphite to plotly
+        var pData = [];
+        for ( var i = 0; i < data.length; i ++ ) {
+          pData[i] = {};
+          pData[i].x = [];
+          pData[i].y = [];
+          pData[i].name = data[i].target;
+          pData[i].line = { width: 0.5 };
+  
+          for ( var j = 0; j < data[i].datapoints.length; j++ ) {
+            pData[i].y.push( data[i].datapoints[j][0] );
+            pData[i].x.push( data[i].datapoints[j][1] * 1000 );
+          }
+        }
+
+        var graphOptions = {
+          fileopt : "overwrite",
+          filename : record.data.params.title || decodeURIComponent( record.data.target ),
+          world_readable : false,
+          layout : {
+            title : record.data.params.title || decodeURIComponent( record.data.target ),
+            showlegend: true,
+            legend : {
+              y: -0.25,
+              x: 0.1,
+              yanchor: "top"
+            },
+            xaxis: {
+              type: "date"
+            }
+          }
+        };
+
+        Ext.Ajax.request({
+          url: 'https://plot.ly/clientresp',
+          method: 'POST',
+          params: {
+            un: pUserName,
+            key: pRestKey,
+            origin: 'plot',
+            platform: 'graphite',
+            args: JSON.stringify(pData),
+            kwargs : JSON.stringify(graphOptions)
+          },
+          success: function (response) {
+            var result = Ext.decode(response.responseText);
+            if (result.error) {
+              Ext.Msg.alert("Error", "There was an error creatling plot.ly: " + result.error);
+            }
+            window.open( result.url );
+          },
+          failure: failedAjaxCall
+        });
+      }
+    },
+    failure: failedAjaxCall
+  });
 }
 
 function removeAllGraphs() {
